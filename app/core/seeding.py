@@ -177,9 +177,28 @@ def generate_master_products() -> List[Dict[str, Any]]:
     return products
 
 async def seed_convenience_data():
+    # Check if we need to migrate/re-seed stores to include products dict
+    first_store = await stores_collection.find_one({})
+    if first_store and "products" not in first_store:
+        print("Migrating/re-seeding stores and inventory collections to include products dictionary...")
+        await stores_collection.drop()
+        await inventory_collection.drop()
+
+    # Generate master products first
+    products = generate_master_products()
+
     # 1. Seed Stores
     stores_count = await stores_collection.count_documents({})
     if stores_count == 0:
+        # Compute store products dictionary for each store
+        for store in stores_data:
+            store_seed = get_seed_hash(store["id"])
+            target_count = 100 + (store_seed % 41)
+            seen_codes = set()
+            for i in range(target_count):
+                product_idx = (store_seed + i * 7) % len(products)
+                seen_codes.add(products[product_idx]["code"])
+            store["products"] = {code: True for code in seen_codes}
         await stores_collection.insert_many(stores_data)
         print("Seeded Stores database successfully.")
         
@@ -191,7 +210,6 @@ async def seed_convenience_data():
 
     # 3. Seed Products
     products_count = await products_collection.count_documents({})
-    products = generate_master_products()
     if products_count == 0:
         await products_collection.insert_many(products)
         print("Seeded Master Products successfully.")
