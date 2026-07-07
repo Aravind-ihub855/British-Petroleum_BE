@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 1440
 
     class Config:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), ".env")
+        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), ".env")
         env_file_encoding = "utf-8"
         extra = "ignore"
 

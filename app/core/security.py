@@ -4,8 +4,8 @@ from jose import JWTError, jwt
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from .config import settings
-from .database import users_collection
+from app.core.config import settings
+from app.core.database import users_collection
 from bson import ObjectId
 
 # Password context for hashing
