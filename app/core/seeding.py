@@ -8,6 +8,9 @@ stores_collection = db["stores"]
 vendors_collection = db["vendors"]
 products_collection = db["products"]
 inventory_collection = db["inventory"]
+purchase_orders_collection = db["purchase_orders"]
+vendor_issues_collection = db["vendor_issues"]
+recommendations_collection = db["recommendations"]
 
 def get_seed_hash(s: str) -> int:
     hash_val = 0
@@ -242,9 +245,8 @@ async def seed_convenience_data():
                     
                 avg_consumption = round(avg_consumption, 1)
                 
-                # Check for Chicago / LA non-risk stores
-                if store_id in ("BP-CHI-1026", "BP-LAX-1090"):
-                    # Force healthy inventory levels to make them fully non-risk stores
+                # Check for LA non-risk store
+                if store_id == "BP-LAX-1090":
                     current_stock = int(round(avg_consumption * (15 + (item_seed % 15))))
                 else:
                     is_regional_shortage = product["code"] in ("BP-PROD-001", "BP-PROD-002", "BP-PROD-003", "BP-PROD-004")
@@ -322,3 +324,108 @@ async def seed_convenience_data():
         if inventory_items:
             await inventory_collection.insert_many(inventory_items)
             print(f"Seeded {len(inventory_items)} Store Inventory records successfully.")
+
+        # 5. Seed Purchase Orders, Issues, and Recommendations
+        po_count = await purchase_orders_collection.count_documents({})
+        if po_count == 0:
+            print("Seeding Purchase Orders, Issues, and Recommendations...")
+            purchase_orders = []
+            issues = []
+            recommendations = []
+            
+            today = datetime(2026, 7, 8)
+            statuses = ["Pending Approval", "Pending Review", "Returned", "Approved", "In Transit", "Delivered", "Delivered", "Delivered", "Delayed", "Cancelled"]
+            
+            for vendor in vendors_data:
+                vendor_id = vendor["id"]
+                vendor_name = vendor["name"]
+                
+                # Find products for this vendor
+                v_products = [p for p in products_data if p["vendorId"] == vendor_id]
+                if not v_products:
+                    continue
+                    
+                po_count_for_vendor = 4 + (get_seed_hash(vendor_id) % 8)
+                is_chicago = vendor["city"].lower() == "chicago"
+                
+                for i in range(po_count_for_vendor):
+                    p_idx = (get_seed_hash(vendor_id) + i) % len(v_products)
+                    prod = v_products[p_idx]
+                    seed = get_seed_hash(f"{vendor_id}_{prod['code']}_{i}")
+                    
+                    status = statuses[seed % len(statuses)]
+                    expected_date = today + timedelta(days=(seed % 14) - 7)
+                    
+                    if is_chicago and i == 0:
+                        status = "Delayed"
+                        expected_date = today - timedelta(days=2)
+                    elif is_chicago and i == 1:
+                        status = "Pending Approval"
+                        
+                    purchase_orders.append({
+                        "id": f"PO-{10000 + len(purchase_orders) * 7}",
+                        "vendorId": vendor_id,
+                        "vendorName": vendor_name,
+                        "items": [{"name": prod["name"], "quantity": (seed % 10 + 1) * 100}],
+                        "totalAmount": round(((seed % 10 + 1) * 100) * prod["unitPrice"], 2),
+                        "status": status,
+                        "orderDate": (expected_date - timedelta(days=prod["leadTimeDays"] + 2)).strftime("%Y-%m-%d"),
+                        "expectedDeliveryDate": expected_date.strftime("%Y-%m-%d")
+                    })
+                    
+            # Generate Issues
+            issue_types = ["Delivery delayed by 2 days", "Fill Rate below SLA", "Invoice mismatch", "Quality control failure", "Missing documentation"]
+            severities = ["High", "Medium", "Low", "High", "Medium"]
+            
+            for v_idx, vendor in enumerate(vendors_data):
+                seed = get_seed_hash(vendor["id"] + "issue")
+                is_chicago = vendor["city"].lower() == "chicago"
+                
+                if seed % 3 == 0 or (is_chicago and v_idx % 2 == 0):
+                    issue_idx = 0 if (is_chicago and v_idx % 2 == 0) else (seed % len(issue_types))
+                    issues.append({
+                        "id": f"ISSUE-{1000 + v_idx}",
+                        "vendorId": vendor["id"],
+                        "vendorName": vendor["name"],
+                        "issueType": issue_types[issue_idx],
+                        "description": f"Vendor has reported {issue_types[issue_idx].lower()}.",
+                        "dateReported": (today - timedelta(days=(seed % 5))).strftime("%Y-%m-%d"),
+                        "status": "Open",
+                        "priority": severities[issue_idx],
+                        "relatedPO": f"PO-{10000 + v_idx * 100}"
+                    })
+                    
+            # Generate Recommendations
+            recommendations.extend([
+                {
+                    "id": "REC-1",
+                    "type": "Vendor Consolidation",
+                    "description": f"Consolidating orders from {vendors_data[0]['name']} could save 8% in logistics.",
+                    "actionLabel": "Review Consolidation",
+                    "priority": "High"
+                },
+                {
+                    "id": "REC-2",
+                    "type": "SLA Alert",
+                    "description": f"Chicago supplier {vendors_data[6]['name']} is trending below 90% On-Time Delivery.",
+                    "actionLabel": "Send Warning",
+                    "priority": "High"
+                },
+                {
+                    "id": "REC-3",
+                    "type": "Cost Optimization",
+                    "description": f"New bulk discount available for {products_data[0]['name']}.",
+                    "actionLabel": "View Discount",
+                    "priority": "Medium"
+                }
+            ])
+            
+            if purchase_orders:
+                await purchase_orders_collection.insert_many(purchase_orders)
+            if issues:
+                await vendor_issues_collection.insert_many(issues)
+            if recommendations:
+                await recommendations_collection.insert_many(recommendations)
+                
+            print(f"Seeded {len(purchase_orders)} POs, {len(issues)} Issues, and {len(recommendations)} Recommendations successfully.")
+

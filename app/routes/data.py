@@ -8,6 +8,9 @@ stores_collection = db["stores"]
 vendors_collection = db["vendors"]
 products_collection = db["products"]
 inventory_collection = db["inventory"]
+purchase_orders_collection = db["purchase_orders"]
+vendor_issues_collection = db["vendor_issues"]
+recommendations_collection = db["recommendations"]
 
 router = APIRouter(prefix="/api/data", tags=["Convenience Store Data"])
 
@@ -81,3 +84,21 @@ async def get_inventory(current_user: dict = Depends(get_current_user)):
         
     inv_list = await inv_cursor.to_list(length=2000)
     return [serialize_doc(item) for item in inv_list]
+
+@router.get("/purchase-orders", response_model=List[Dict[str, Any]])
+async def get_purchase_orders(current_user: dict = Depends(get_current_user)):
+    cursor = purchase_orders_collection.find()
+    lst = await cursor.to_list(length=1000)
+    return [serialize_doc(i) for i in lst]
+
+@router.get("/vendor-issues", response_model=List[Dict[str, Any]])
+async def get_vendor_issues(current_user: dict = Depends(get_current_user)):
+    cursor = vendor_issues_collection.find()
+    lst = await cursor.to_list(length=500)
+    return [serialize_doc(i) for i in lst]
+
+@router.get("/recommendations", response_model=List[Dict[str, Any]])
+async def get_recommendations(current_user: dict = Depends(get_current_user)):
+    cursor = recommendations_collection.find()
+    lst = await cursor.to_list(length=100)
+    return [serialize_doc(i) for i in lst]
