@@ -429,3 +429,8 @@ async def seed_convenience_data():
                 
             print(f"Seeded {len(purchase_orders)} POs, {len(issues)} Issues, and {len(recommendations)} Recommendations successfully.")
 
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(seed_convenience_data())
+

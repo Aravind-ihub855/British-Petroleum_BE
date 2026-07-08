@@ -4,7 +4,6 @@ from app.routes.auth import router as auth_router
 from app.routes.data import router as data_router
 from app.core.database import users_collection
 from app.core.security import get_password_hash
-from app.core.seeding import seed_convenience_data
 from datetime import datetime
 
 app = FastAPI(title="BP Auth API", version="1.0.0")
@@ -39,10 +38,6 @@ async def seed_users():
             "created_at": datetime.utcnow()
         })
         print(f"Seeded super admin: {admin_email}")
-
-@app.on_event("startup")
-async def seed_data():
-    await seed_convenience_data()
 
 @app.get("/")
 def read_root():
