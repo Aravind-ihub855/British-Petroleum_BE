@@ -180,12 +180,15 @@ def generate_master_products() -> List[Dict[str, Any]]:
     return products
 
 async def seed_convenience_data():
-    # Check if we need to migrate/re-seed stores to include products dict
-    first_store = await stores_collection.find_one({})
-    if first_store and "products" not in first_store:
-        print("Migrating/re-seeding stores and inventory collections to include products dictionary...")
-        await stores_collection.drop()
-        await inventory_collection.drop()
+    # Force re-seed to apply new PO structure
+    print("Migrating/re-seeding all collections to include updated PO fields...")
+    await stores_collection.drop()
+    await inventory_collection.drop()
+    await vendors_collection.drop()
+    await products_collection.drop()
+    await purchase_orders_collection.drop()
+    await vendor_issues_collection.drop()
+    await recommendations_collection.drop()
 
     # Generate master products first
     products = generate_master_products()
@@ -262,6 +265,12 @@ async def seed_convenience_data():
                 
                 # Safety stock, ROL, ROQ
                 safety_stock_level = int(math.ceil(avg_consumption * 0.5 * product["leadTimeDays"]))
+                
+                # GUARANTEE SUPPLY RISK for a few items to populate the dashboard KPI
+                if i in (1, 3) and store_id != "BP-LAX-1090":
+                    current_stock = 2
+                    safety_stock_level = 20
+                    
                 derived_rol = int(math.ceil(avg_consumption * product["leadTimeDays"]) + safety_stock_level)
                 derived_roq = int(round(avg_consumption * 15))
                 
@@ -341,12 +350,15 @@ async def seed_convenience_data():
                 vendor_name = vendor["name"]
                 
                 # Find products for this vendor
-                v_products = [p for p in products_data if p["vendorId"] == vendor_id]
+                v_products = [p for p in products if p["vendorId"] == vendor_id]
                 if not v_products:
                     continue
                     
                 po_count_for_vendor = 4 + (get_seed_hash(vendor_id) % 8)
                 is_chicago = vendor["city"].lower() == "chicago"
+                
+                # Guarantee at least one "Delivered" for performance metrics
+                # Guarantee at least one "In Transit" due today for KPI
                 
                 for i in range(po_count_for_vendor):
                     p_idx = (get_seed_hash(vendor_id) + i) % len(v_products)
@@ -356,21 +368,42 @@ async def seed_convenience_data():
                     status = statuses[seed % len(statuses)]
                     expected_date = today + timedelta(days=(seed % 14) - 7)
                     
-                    if is_chicago and i == 0:
+                    if i == 0:
+                        status = "Delivered"
+                        expected_date = today - timedelta(days=5)
+                    elif i == 1:
+                        status = "In Transit"
+                        expected_date = today
+                    elif is_chicago and i == 2:
                         status = "Delayed"
                         expected_date = today - timedelta(days=2)
-                    elif is_chicago and i == 1:
+                    elif is_chicago and i == 3:
                         status = "Pending Approval"
                         
+                    actual_date = None
+                    if status == "Delivered":
+                        # 80% on-time, 20% delayed (Guarantee the first one is on-time so it's never 0%)
+                        if seed % 5 == 0 and i != 0:
+                            actual_date = expected_date + timedelta(days=1 + (seed % 3))
+                        else:
+                            actual_date = expected_date - timedelta(days=(seed % 2))
+                            
+                    expected_items = (seed % 10 + 1) * 100
+                    # 90% chance full fill rate, 10% partial
+                    received_items = expected_items if seed % 10 != 0 else int(expected_items * 0.8)
+
                     purchase_orders.append({
                         "id": f"PO-{10000 + len(purchase_orders) * 7}",
                         "vendorId": vendor_id,
                         "vendorName": vendor_name,
-                        "items": [{"name": prod["name"], "quantity": (seed % 10 + 1) * 100}],
-                        "totalAmount": round(((seed % 10 + 1) * 100) * prod["unitPrice"], 2),
+                        "items": [{"name": prod["name"], "quantity": expected_items}],
+                        "totalAmount": round(expected_items * prod["unitPrice"], 2),
                         "status": status,
                         "orderDate": (expected_date - timedelta(days=prod["leadTimeDays"] + 2)).strftime("%Y-%m-%d"),
-                        "expectedDeliveryDate": expected_date.strftime("%Y-%m-%d")
+                        "expectedDeliveryDate": expected_date.strftime("%Y-%m-%d"),
+                        "actualDeliveryDate": actual_date.strftime("%Y-%m-%d") if actual_date else None,
+                        "expectedItems": expected_items,
+                        "receivedItems": received_items if status == "Delivered" else 0
                     })
                     
             # Generate Issues
@@ -414,7 +447,7 @@ async def seed_convenience_data():
                 {
                     "id": "REC-3",
                     "type": "Cost Optimization",
-                    "description": f"New bulk discount available for {products_data[0]['name']}.",
+                    "description": f"New bulk discount available for {products[0]['name']}.",
                     "actionLabel": "View Discount",
                     "priority": "Medium"
                 }
